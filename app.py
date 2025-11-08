@@ -5,9 +5,6 @@ from PIL import Image
 import tensorflow as tf
 import os
 
-# Force CPU usage
-os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
-
 # Load the Keras model (update the filename/path accordingly)
 model = tf.keras.models.load_model("animal_classification_model.keras")
 
@@ -76,3 +73,4 @@ if img_file_buffer:
     st.image(output_img, caption="Detection Result", use_container_width=True)
 else:
     st.info("Please capture an image or upload one to start detection.")
+
