@@ -6,7 +6,7 @@ import tensorflow as tf
 import os
 
 # Load the Keras model (update the filename/path accordingly)
-model = tf.keras.models.load_model("animal_classification_model.keras")
+model = tf.keras.models.load_model("animal_classification_model.keras", compile=False)
 
 # Define the animal classes
 classes = ['elephant', 'cheeta', 'wild boar']
@@ -73,4 +73,5 @@ if img_file_buffer:
     st.image(output_img, caption="Detection Result", use_container_width=True)
 else:
     st.info("Please capture an image or upload one to start detection.")
+
 
