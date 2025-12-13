@@ -23,11 +23,11 @@ st.set_page_config(
 @st.cache_resource
 def load_model():
     """Load the cleaned animal classification model."""
-    model_path = "animal_classification_model_clean.keras"
+    model_path = "animal_classification_model.keras"
     
     if not os.path.exists(model_path):
         st.error(f"❌ Model file not found: {model_path}")
-        st.info("Make sure 'animal_classification_model_clean.keras' is in the same directory as app.py")
+        st.info("Make sure 'animal_classification_model.keras' is in the same directory as app.py")
         st.stop()
     
     try:
@@ -210,3 +210,4 @@ st.markdown(
     "</div>",
     unsafe_allow_html=True,
 )
+
