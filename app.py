@@ -17,29 +17,31 @@ st.set_page_config(
 )
 
 # ============================================================================
-# MODEL LOADING
+# TFLITE MODEL LOADING
 # ============================================================================
 
 @st.cache_resource
-def load_model():
-    """Load the cleaned animal classification model."""
-    model_path = "animal_classification_model.keras"
+def load_tflite_model():
+    """Load the quantized TensorFlow Lite model."""
+    model_path = "animal_classification_model.tflite"
     
     if not os.path.exists(model_path):
         st.error(f"❌ Model file not found: {model_path}")
-        st.info("Make sure 'animal_classification_model.keras' is in the same directory as app.py")
+        st.info("Make sure 'animal_classification_model.tflite' is in the same directory as app.py")
         st.stop()
     
     try:
-        model = tf.keras.models.load_model(model_path, compile=False)
-        st.sidebar.success("✅ Model loaded successfully!")
-        return model
+        # Load the TFLite model and allocate tensors
+        interpreter = tf.lite.Interpreter(model_path=model_path)
+        interpreter.allocate_tensors()
+        st.sidebar.success("✅ TFLite Model loaded successfully!")
+        return interpreter
     except Exception as e:
-        st.error(f"❌ Error loading model: {e}")
+        st.error(f"❌ Error loading TFLite model: {e}")
         st.stop()
 
-# Load the model
-model = load_model()
+# Load the TFLite interpreter
+interpreter = load_tflite_model()
 
 # Animal classes (must match your training data order)
 classes = ['elephant', 'cheeta', 'wild boar']
@@ -50,13 +52,13 @@ classes = ['elephant', 'cheeta', 'wild boar']
 
 def preprocess_image(image: Image.Image) -> np.ndarray:
     """
-    Preprocess the input image to match model expectations.
+    Preprocess the input image to match TFLite model expectations.
     
     Args:
         image: PIL Image object
         
     Returns:
-        numpy array of shape (1, 224, 224, 3) normalized to [0, 1]
+        numpy array of shape (1, 224, 224, 3) in correct format
     """
     # Resize to model input size
     img = image.resize((224, 224))
@@ -75,7 +77,50 @@ def preprocess_image(image: Image.Image) -> np.ndarray:
     # Add batch dimension
     img_array = np.expand_dims(img_array, axis=0)
     
-    return img_array
+    return img_array.astype("float32")
+
+# ============================================================================
+# TFLITE INFERENCE
+# ============================================================================
+
+def run_tflite_inference(input_data: np.ndarray) -> np.ndarray:
+    """
+    Run inference using the TFLite model.
+    
+    Args:
+        input_data: Preprocessed image array
+        
+    Returns:
+        Model predictions
+    """
+    # Get input and output details
+    input_details = interpreter.get_input_details()
+    output_details = interpreter.get_output_details()
+    
+    # Check if input is quantized
+    input_dtype = input_details[0]['dtype']
+    
+    # Handle quantized input (int8)
+    if input_dtype == np.int8:
+        input_scale, input_zero_point = input_details[0]['quantization']
+        input_data = (input_data / input_scale + input_zero_point).astype(np.int8)
+    
+    # Set input tensor
+    interpreter.set_tensor(input_details[0]['index'], input_data)
+    
+    # Run inference
+    interpreter.invoke()
+    
+    # Get output
+    output_data = interpreter.get_tensor(output_details[0]['index'])
+    
+    # Handle quantized output (int8)
+    if output_details[0]['dtype'] == np.int8:
+        output_scale, output_zero_point = output_details[0]['quantization']
+        output_data = output_data.astype(np.float32)
+        output_data = (output_data - output_zero_point) * output_scale
+    
+    return output_data
 
 # ============================================================================
 # PREDICTION & VISUALIZATION
@@ -94,8 +139,8 @@ def predict_and_draw(image: Image.Image):
     # Preprocess image
     input_img = preprocess_image(image)
     
-    # Get prediction
-    prediction = model.predict(input_img, verbose=0)
+    # Get prediction using TFLite
+    prediction = run_tflite_inference(input_img)
     
     # Debug info (hidden by default but useful for troubleshooting)
     with st.expander("🔍 Debug Info"):
@@ -158,13 +203,14 @@ def predict_and_draw(image: Image.Image):
 # STREAMLIT UI
 # ============================================================================
 
-st.title("🦁 Animal Detection with CNN")
+st.title("🦁 Animal Detection with TFLite")
 
 st.markdown("""
-This app uses a Convolutional Neural Network to classify animals from images.
+This app uses a quantized TensorFlow Lite model to classify animals from images.
+- **Model Type**: TensorFlow Lite (Quantized)
 - **Supported animals**: Elephant, Cheetah, Wild Boar
 - **Input size**: 224 × 224 pixels
-- **Model**: EfficientNet-based CNN
+- **Architecture**: MobileNetV2-based CNN
 
 Capture an image using your webcam or upload a file to get started!
 """)
@@ -172,9 +218,10 @@ Capture an image using your webcam or upload a file to get started!
 # Sidebar info
 with st.sidebar:
     st.header("📋 About")
-    st.write(f"**Model Status**: ✅ Loaded")
+    st.write(f"**Model Type**: ✅ TFLite (Quantized)")
     st.write(f"**Classes**: {', '.join([c.capitalize() for c in classes])}")
     st.write(f"**Input shape**: (224, 224, 3)")
+    st.write(f"**Model size**: Optimized for mobile/edge")
 
 # Main content
 st.subheader("Capture or Upload Image")
@@ -206,8 +253,7 @@ else:
 st.markdown("---")
 st.markdown(
     "<div style='text-align: center; color: gray;'>"
-    "Built with Streamlit & TensorFlow 🚀"
+    "Built with Streamlit & TensorFlow Lite 🚀"
     "</div>",
     unsafe_allow_html=True,
 )
-
