@@ -5,10 +5,18 @@ from PIL import Image
 import tensorflow as tf
 import os
 
-# Load the Keras model (update the filename/path accordingly)
-model = tf.keras.models.load_model("animal_classification_model.keras", compile=False)
+@st.cache_resource
+def load_model():
+    model = tf.keras.models.load_model(
+        "animal_classification_model.keras",
+        compile=False,
+        custom_objects=None,  # Explicitly set if using custom layers
+        safe_mode=False  # Try disabling safe mode
+    )
+    return model
 
-# Define the animal classes
+model = load_model()
+
 classes = ['elephant', 'cheeta', 'wild boar']
 
 # Image preprocessing function
@@ -73,6 +81,7 @@ if img_file_buffer:
     st.image(output_img, caption="Detection Result", use_container_width=True)
 else:
     st.info("Please capture an image or upload one to start detection.")
+
 
 
 
