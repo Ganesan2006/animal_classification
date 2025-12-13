@@ -4,6 +4,9 @@ import numpy as np
 from PIL import Image
 import tensorflow as tf
 import os
+from urllib.request import urlopen
+from io import BytesIO
+import requests
 
 # ============================================================================
 # PAGE CONFIGURATION
@@ -12,7 +15,7 @@ import os
 st.set_page_config(
     page_title="Animal Detection with CNN",
     page_icon="🦁",
-    layout="centered",
+    layout="wide",
     initial_sidebar_state="expanded"
 )
 
@@ -181,6 +184,12 @@ def predict_and_draw(image: Image.Image):
         x_max = int(bbox[2] * width)
         y_max = int(bbox[3] * height)
         
+        # Ensure coordinates are within image bounds
+        x_min = max(0, x_min)
+        y_min = max(0, y_min)
+        x_max = min(width, x_max)
+        y_max = min(height, y_max)
+        
         # Draw rectangle
         cv2.rectangle(img_cv, (x_min, y_min), (x_max, y_max), (0, 255, 0), 2)
     
@@ -200,6 +209,30 @@ def predict_and_draw(image: Image.Image):
     return Image.fromarray(img_cv)
 
 # ============================================================================
+# IMAGE LOADING HELPERS
+# ============================================================================
+
+def load_image_from_url(url: str) -> Image.Image:
+    """Load image from URL."""
+    try:
+        response = requests.get(url, timeout=10)
+        response.raise_for_status()
+        img = Image.open(BytesIO(response.content))
+        return img
+    except Exception as e:
+        st.error(f"❌ Error loading image from URL: {e}")
+        return None
+
+def load_image_from_file(uploaded_file) -> Image.Image:
+    """Load image from uploaded file."""
+    try:
+        img = Image.open(uploaded_file)
+        return img
+    except Exception as e:
+        st.error(f"❌ Error loading image: {e}")
+        return None
+
+# ============================================================================
 # STREAMLIT UI
 # ============================================================================
 
@@ -212,7 +245,7 @@ This app uses a quantized TensorFlow Lite model to classify animals from images.
 - **Input size**: 224 × 224 pixels
 - **Architecture**: MobileNetV2-based CNN
 
-Capture an image using your webcam or upload a file to get started!
+Choose your preferred input method below!
 """)
 
 # Sidebar info
@@ -223,14 +256,88 @@ with st.sidebar:
     st.write(f"**Input shape**: (224, 224, 3)")
     st.write(f"**Model size**: Optimized for mobile/edge")
 
-# Main content
-st.subheader("Capture or Upload Image")
+# ============================================================================
+# INPUT METHOD SELECTOR
+# ============================================================================
 
-img_file_buffer = st.camera_input("📷 Capture Image or Upload File")
+st.subheader("📸 Choose Input Method")
 
-if img_file_buffer is not None:
-    # Load image
-    image = Image.open(img_file_buffer)
+# Create tabs for different input methods
+tab1, tab2, tab3, tab4 = st.tabs([
+    "📷 Webcam Capture",
+    "📁 Upload File",
+    "🔗 Image URL",
+    "💻 Paste Clipboard"
+])
+
+image = None
+source_name = None
+
+# ============================================================================
+# TAB 1: WEBCAM CAPTURE
+# ============================================================================
+
+with tab1:
+    st.write("Capture an image directly from your webcam:")
+    img_file_buffer = st.camera_input("Capture Image from Webcam")
+    
+    if img_file_buffer is not None:
+        image = load_image_from_file(img_file_buffer)
+        source_name = "Webcam Capture"
+
+# ============================================================================
+# TAB 2: FILE UPLOAD
+# ============================================================================
+
+with tab2:
+    st.write("Upload image file(s) from your device:")
+    uploaded_files = st.file_uploader(
+        "Choose image file(s)",
+        type=["jpg", "jpeg", "png", "bmp", "gif"],
+        accept_multiple_files=False
+    )
+    
+    if uploaded_files is not None:
+        image = load_image_from_file(uploaded_files)
+        source_name = uploaded_files.name
+
+# ============================================================================
+# TAB 3: IMAGE URL
+# ============================================================================
+
+with tab3:
+    st.write("Paste the URL of an image:")
+    url_input = st.text_input(
+        "Enter image URL",
+        placeholder="https://example.com/image.jpg"
+    )
+    
+    if url_input and st.button("🔗 Load from URL", key="url_button"):
+        with st.spinner("Loading image from URL..."):
+            image = load_image_from_url(url_input)
+            source_name = "URL: " + url_input if image else None
+
+# ============================================================================
+# TAB 4: CLIPBOARD PASTE
+# ============================================================================
+
+with tab4:
+    st.write("Screenshot and paste directly (Windows/Mac):")
+    st.info("💡 **How to use:**\n1. Take a screenshot (Ctrl+PrintScreen or Cmd+Shift+4)\n2. Copy to clipboard\n3. Right-click in the text area below and paste")
+    
+    # Note: Direct clipboard paste from browser is limited
+    # This is a workaround using text input
+    st.warning("⚠️ Note: Browser security restricts direct clipboard access. Try these alternatives:\n"
+               "- Use the **Upload File** tab to select from your downloads\n"
+               "- Use the **Image URL** tab to link to online images\n"
+               "- Use the **Webcam** tab for live capture")
+
+# ============================================================================
+# DISPLAY AND PREDICT
+# ============================================================================
+
+if image is not None:
+    st.success(f"✅ Image loaded from: {source_name}")
     
     # Display original image
     col1, col2 = st.columns(2)
@@ -245,14 +352,49 @@ if img_file_buffer is not None:
         st.image(output_img, caption="🎯 Detection Result", use_container_width=True)
     
     st.success("✅ Prediction complete!")
+    
+    # Display detailed results
+    st.subheader("📊 Prediction Details")
+    
+    # Re-run prediction to get confidence scores
+    input_img = preprocess_image(image)
+    prediction = run_tflite_inference(input_img)
+    
+    if prediction.shape[1] >= 3:
+        class_probs = prediction[0, :3]
+        
+        # Create a DataFrame for better visualization
+        import pandas as pd
+        results_df = pd.DataFrame({
+            'Animal': [c.capitalize() for c in classes],
+            'Confidence': [f"{p:.2%}" for p in class_probs]
+        })
+        
+        st.dataframe(results_df, use_container_width=True)
+        
+        # Show top prediction
+        top_class = classes[int(np.argmax(class_probs))]
+        top_confidence = class_probs[int(np.argmax(class_probs))]
+        st.metric("Top Prediction", top_class.capitalize(), f"{top_confidence:.2%}")
 
 else:
-    st.info("👆 Please capture an image using your webcam or upload a file to start detection.")
+    st.info("👆 Please choose an input method above and provide an image to start detection.")
 
-# Footer
+# ============================================================================
+# FOOTER
+# ============================================================================
+
 st.markdown("---")
+col1, col2, col3 = st.columns(3)
+with col1:
+    st.markdown("🦁 **Elephant**\nLarge herbivore")
+with col2:
+    st.markdown("🐆 **Cheetah**\nFastest land animal")
+with col3:
+    st.markdown("🐗 **Wild Boar**\nWild pig species")
+
 st.markdown(
-    "<div style='text-align: center; color: gray;'>"
+    "<div style='text-align: center; color: gray; margin-top: 20px;'>"
     "Built with Streamlit & TensorFlow Lite 🚀"
     "</div>",
     unsafe_allow_html=True,
